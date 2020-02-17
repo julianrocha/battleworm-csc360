@@ -40,7 +40,7 @@ typedef struct task_info {
   task_t blocking_task;
   //   d. Was the task blocked waiting for user input? Once you successfully
   //      read input, you will need to save it here so it can be returned.
-  char user_input;
+  int user_input;
 } task_info_t;
 
 int current_task = 0; //< The handle of the currently-executing task
@@ -58,12 +58,12 @@ void scheduler_entry_point(){
         current_task = i;
         swapcontext(&scheduler_thread, &tasks[i].context);
       }
+      if(tasks[i].state == SLEEPING && tasks[i].wake_time <= time_ms()){
+        tasks[i].state = READY;
+      }
       if(tasks[i].state == BLOCKED && tasks[tasks[i].blocking_task].state == TERMINATED){
         tasks[i].state = READY;
         tasks[i].blocking_task = -1;
-      }
-      if(tasks[i].state == SLEEPING && tasks[i].wake_time <= time_ms()){
-        tasks[i].state = READY;
       }
       if(tasks[i].state == WAITING_FOR_INPUT){
         tasks[i].user_input = getch();
@@ -145,8 +145,6 @@ void task_create(task_t* handle, task_fn_t fn) {
 
   // initialize rest of task_info struct
   tasks[index].state = READY;
-  tasks[index].wake_time = time_ms();
-  tasks[index].blocking_task = -1;
 }
 
 /**
