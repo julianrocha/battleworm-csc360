@@ -15,6 +15,13 @@
 // This is the size of each task's stack memory
 #define STACK_SIZE 65536
 
+// task states:
+#define READY 1
+#define SLEEPING 2
+#define BLOCKED 3
+#define WAITING_FOR_INPUT 4
+#define TERMINATED 5
+
 // This struct will hold the all the necessary information for each task
 typedef struct task_info {
   // This field stores all the state required to switch back to this task
@@ -26,22 +33,64 @@ typedef struct task_info {
   
   // TODO: Add fields here so you can:
   //   a. Keep track of this task's state.
+  int state;
   //   b. If the task is sleeping, when should it wake up?
+  size_t wake_time; // use time_ms + sleep_ms to set a wake time in the future
   //   c. If the task is waiting for another task, which task is it waiting for?
+  task_t blocking_task;
   //   d. Was the task blocked waiting for user input? Once you successfully
   //      read input, you will need to save it here so it can be returned.
+  char user_input;
 } task_info_t;
 
 int current_task = 0; //< The handle of the currently-executing task
 int num_tasks = 1;    //< The number of tasks created so far
 task_info_t tasks[MAX_TASKS]; //< Information for every task
 
+ucontext_t scheduler_thread;
+
+void scheduler_entry_point(){
+  while(num_tasks > 0) {
+    //printf("there are %d tasks\n", num_tasks);
+    for(int i = 0; i < num_tasks; i++){
+      //printf("task %d state is %d\n", i, tasks[i].state);
+      if(tasks[i].state == READY){
+        current_task = i;
+        swapcontext(&scheduler_thread, &tasks[i].context);
+      }
+      if(tasks[i].state == BLOCKED && tasks[tasks[i].blocking_task].state == TERMINATED){
+        tasks[i].state = READY;
+        tasks[i].blocking_task = -1;
+      }
+      if(tasks[i].state == SLEEPING && tasks[i].wake_time <= time_ms()){
+        tasks[i].state = READY;
+      }
+      if(tasks[i].state == WAITING_FOR_INPUT){
+        tasks[i].user_input = getch();
+        if(tasks[i].user_input != ERR){
+          tasks[i].state = READY;
+        }
+      }
+    }
+  }
+  puts("scheduler_entry_point finished");
+}
+
 /**
  * Initialize the scheduler. Programs should call this before calling any other
  * functiosn in this file.
  */
 void scheduler_init() {
-  // TODO: Initialize the state of the scheduler 
+  getcontext(&scheduler_thread);
+  
+  // Allocate a stack for the new task and add it to the context
+  scheduler_thread.uc_stack.ss_sp = malloc(STACK_SIZE);
+  scheduler_thread.uc_stack.ss_size = STACK_SIZE;
+
+  scheduler_thread.uc_link = 0;
+  
+  // And finally, set up the context to execute the task function
+  makecontext(&scheduler_thread, scheduler_entry_point, 0);
 }
 
 
@@ -51,7 +100,8 @@ void scheduler_init() {
  * because of how the contexts are set up in the task_create function.
  */
 void task_exit() {
-  // TODO: Handle the end of a task's execution here
+  tasks[current_task].state = TERMINATED;
+  swapcontext(&tasks[current_task].context, &scheduler_thread);
 }
 
 /**
@@ -92,6 +142,11 @@ void task_create(task_t* handle, task_fn_t fn) {
   
   // And finally, set up the context to execute the task function
   makecontext(&tasks[index].context, fn, 0);
+
+  // initialize rest of task_info struct
+  tasks[index].state = READY;
+  tasks[index].wake_time = time_ms();
+  tasks[index].blocking_task = -1;
 }
 
 /**
@@ -101,7 +156,11 @@ void task_create(task_t* handle, task_fn_t fn) {
  * \param handle  This is the handle produced by task_create
  */
 void task_wait(task_t handle) {
-  // TODO: Block this task until the specified task has exited.
+  // Turn main thread into a blocked task in the tasks array
+  tasks[0].state = BLOCKED;
+  tasks[0].blocking_task = handle;
+
+  swapcontext(&tasks[0].context, &scheduler_thread);
 }
 
 /**
@@ -112,8 +171,13 @@ void task_wait(task_t handle) {
  * \param ms  The number of milliseconds the task should sleep.
  */
 void task_sleep(size_t ms) {
-  // TODO: Block this task until the requested time has elapsed.
-  // Hint: Record the time the task should wake up instead of the time left for it to sleep. The bookkeeping is easier this way.
+  if(ms == 0){
+    return;
+  }
+  tasks[current_task].state = SLEEPING;
+  tasks[current_task].wake_time = time_ms() + ms;
+
+  swapcontext(&tasks[current_task].context, &scheduler_thread);
 }
 
 /**
@@ -127,5 +191,9 @@ int task_readchar() {
   // TODO: Block this task until there is input available.
   // To check for input, call getch(). If it returns ERR, no input was available.
   // Otherwise, getch() will returns the character code that was read.
-  return ERR;
+  tasks[current_task].user_input = ERR;
+  tasks[current_task].state = WAITING_FOR_INPUT;
+  swapcontext(&tasks[current_task].context, &scheduler_thread);
+  
+  return tasks[current_task].user_input;
 }

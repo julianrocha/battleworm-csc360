@@ -1,4 +1,4 @@
-CC := clang
+CC := gcc # changed from clang to gcc for linux server
 CFLAGS := -g -Wall -Wno-deprecated-declarations -Werror
 
 all: worm

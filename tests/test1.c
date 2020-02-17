@@ -21,7 +21,9 @@ int main() {
   
   task_create(&task1, task1_fn);
   task_create(&task2, task2_fn);
-  
+
+  puts("Finished creating tasks");
+
   task_wait(task1);
   task_wait(task2);
   
